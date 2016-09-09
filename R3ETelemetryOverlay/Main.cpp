@@ -7,6 +7,8 @@
 #include <d3d9.h>
 #include <r3e.h>
 #include <stdio.h>
+#include <thread>
+#include <atomic>
 #include "Detours/detours.h"
 
 #define CUSTOMFVF (D3DFVF_XYZRHW | D3DFVF_DIFFUSE)
@@ -30,10 +32,14 @@ DIRECT3DDEVICE9_ENDSCENE Orig_Direct3DDevice9_EndScene = NULL;
 HANDLE g_SharedMemory = NULL;
 r3e_shared* g_SharedMemoryBuffer = NULL;
 
+// The overlay thread
+std::thread g_OverlayThread;
+std::atomic_bool g_OverlayThreadRunning{ true };
+
 inline void WriteLog(char* msg)
 {
 	FILE* file = NULL;
-	fopen_s(&file, "log.txt", "w");
+	fopen_s(&file, "d:\\Repositories\\Tools\\log.txt", "w");
 	fprintf(file, msg);
 	fflush(file);
 	fclose(file);
@@ -58,8 +64,6 @@ inline r3e_shared* TryGetSharedMemory()
 
 HRESULT WINAPI Hook_Direct3DDevice9_EndScene(LPDIRECT3DDEVICE9 pD3DDevice)
 {
-	WriteLog("IDirect3DDevice9::EndScene has been called");
-
 	// Get the shared memory
 	auto r3esm = TryGetSharedMemory();
 
@@ -102,9 +106,8 @@ DWORD** FindDevice(DWORD Base, DWORD Len)
 	return(0);
 }
 
-BOOL AttachOverlay(HMODULE hModule)
+void AttachOverlay()
 {
-	char buf[16] = "\0";
 	WriteLog("Attach overlay");
 
 	// Wait for the D3D module to be loaded
@@ -127,20 +130,17 @@ BOOL AttachOverlay(HMODULE hModule)
 	if (Orig_Direct3DDevice9_EndScene == NULL)
 	{
 		WriteLog("Failed to get the IDirect3DDevice9::EndScene method from the VTable");
-		return false;
+		return;
 	}
 
 	// Hook the API calls
-	DisableThreadLibraryCalls(hModule);
 	DetourTransactionBegin();
 	DetourUpdateThread(GetCurrentThread());
 	DetourAttach(&(PVOID&)Orig_Direct3DDevice9_EndScene, Hook_Direct3DDevice9_EndScene);
 	DetourTransactionCommit();
-
-	return TRUE;
 }
 
-BOOL DetachOverlay()
+void DetachOverlay()
 {
 	WriteLog("Detach overlay");
 
@@ -161,8 +161,16 @@ BOOL DetachOverlay()
 		CloseHandle(g_SharedMemory);
 		g_SharedMemory = NULL;
 	}
+}
 
-	return TRUE;
+void RenderGameOverlay()
+{
+	AttachOverlay();
+	while (g_OverlayThreadRunning)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+	DetachOverlay();
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
@@ -170,9 +178,21 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD dwReason, LPVOID lpReserved)
 	switch (dwReason)
 	{
 	case DLL_PROCESS_ATTACH:
-		return AttachOverlay(hModule);
+		DisableThreadLibraryCalls(hModule);
+		//g_OverlayThreadRunning = true;
+		//g_OverlayThread = std::thread(RenderGameOverlay);
+		AttachOverlay();
+		break;
 	case DLL_PROCESS_DETACH:
-		return DetachOverlay();
+		/*
+		if (g_OverlayThread.joinable())
+		{
+			g_OverlayThreadRunning = false;
+			g_OverlayThread.join();
+		}
+		*/
+		DetachOverlay();
+		break;
 	}
 
 	return TRUE;

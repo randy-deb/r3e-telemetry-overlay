@@ -15,7 +15,7 @@
 std::atomic_bool g_Running;
 std::mutex g_coutMutex;
 
-HANDLE FindGameProcess()
+HANDLE FindGameProcess(LPTSTR szProcessName)
 {
 	// Take a snapshot of all processes in the system.
 	HANDLE hProcess = NULL;
@@ -30,7 +30,7 @@ HANDLE FindGameProcess()
 		{
 			do
 			{
-				if (_tcscmp(entry.szExeFile, TEXT("DX9Sample.exe")) == 0)
+				if (_tcscmp(entry.szExeFile, szProcessName) == 0)
 				{
 					hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID);
 					break;
@@ -46,7 +46,7 @@ HANDLE FindGameProcess()
 	return hProcess;
 }
 
-HMODULE FindModule(HANDLE hProcess)
+HMODULE FindModule(HANDLE hProcess, LPTSTR szModuleName)
 {
 	// Take a snapshot of all processes in the system.
 	HMODULE hModule = NULL;
@@ -61,13 +61,16 @@ HMODULE FindModule(HANDLE hProcess)
 		{
 			do
 			{
-				if (_tcscmp(entry.szModule, TEXT("R3ETelemetryOverlay.dll")) == 0)
+				if (_tcscmp(entry.szModule, szModuleName) == 0)
 				{
 					hModule = entry.hModule;
 					break;
 				}
 			} while (Module32Next(hModuleSnap, &entry));
 		}
+
+		// Close the snapshot handle
+		CloseHandle(hModuleSnap);
 	}
 
 	return hModule;
@@ -86,7 +89,7 @@ void AttachOverlay(HANDLE hProcess)
 	// Launch the remote thread
 	LPVOID pAddr = (LPVOID)GetProcAddress(GetModuleHandle(L"kernel32.dll"), "LoadLibraryA");
 	LPVOID pParam = (LPVOID)VirtualAllocEx(hProcess, NULL, strlen(szModuleFilename), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-	BOOL b = WriteProcessMemory(hProcess, pParam, szModuleFilename, strlen(szModuleFilename), NULL);
+	WriteProcessMemory(hProcess, pParam, szModuleFilename, strlen(szModuleFilename), NULL);
 	HANDLE hRemoteThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)pAddr, pParam, 0, NULL);
 	WaitForSingleObject(hRemoteThread, INFINITE);
 	CloseHandle(hRemoteThread);
@@ -96,7 +99,7 @@ void AttachOverlay(HANDLE hProcess)
 void DetachOverlay(HANDLE hProcess)
 {
 	// Find the module
-	HMODULE hOverlayModule = FindModule(hProcess);
+	HMODULE hOverlayModule = FindModule(hProcess, TEXT("R3ETelemetryOverlay.dll"));
 	if (hOverlayModule != NULL)
 	{
 		// Launch the remote thread
@@ -141,11 +144,19 @@ void CheckGameRunning()
 		// Try to get the game process handle
 		if (hGameProcess == NULL)
 		{
-			hGameProcess = FindGameProcess();
+			hGameProcess = FindGameProcess(TEXT("RRRE.exe"));
 			if (hGameProcess != NULL)
 			{
-				// Trigger the event
-				OnGameStarted(hGameProcess);
+				if (FindModule(hGameProcess, TEXT("d3d9.dll")) != NULL)
+				{
+					// Trigger the event
+					OnGameStarted(hGameProcess);
+				}
+				else
+				{
+					CloseHandle(hGameProcess);
+					hGameProcess = NULL;
+				}
 			}
 		}
 		else
