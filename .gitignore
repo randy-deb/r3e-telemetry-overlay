@@ -1,0 +1,12 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs
+/Debug
+/R3ETelemetry/Debug
+/R3ETelemetryOverlay/Debug
+*.suo
+*.user
+*.db
+*.opendb
